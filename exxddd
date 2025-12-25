@@ -1,0 +1,213 @@
+--// SERVICES
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+
+--// CONFIG
+local CONFIG = {
+	ScaleMin = 1,
+	ScaleMax = 40,
+	ScaleDefault = 6,
+
+	TransMin = 0,
+	TransMax = 1,
+	TransDefault = 0.75,
+
+	Color = Color3.fromRGB(0, 0, 0),
+	PartShape = Enum.PartType.Ball,
+	Material = Enum.Material.Neon,
+
+	PositionLerpSpeed = 25,
+	SizeLerpSpeed = 25,
+	WatchdogInterval = 2,
+}
+
+--// STATE
+local CurrentScale = CONFIG.ScaleDefault
+local CurrentTransparency = CONFIG.TransDefault
+
+local HitboxEnabled = true
+local HitboxToggleKey = Enum.KeyCode.Semicolon
+
+local ActiveConnections = {}
+local Initialized = {}
+
+local GuiRef
+
+--// LERP UTILS
+local function Lerp(a,b,t) return a + (b-a)*t end
+local function V3Lerp(a,b,t)
+	return Vector3.new(
+		Lerp(a.X,b.X,t),
+		Lerp(a.Y,b.Y,t),
+		Lerp(a.Z,b.Z,t)
+	)
+end
+
+--// GUI
+local function createUI()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "HitboxControls"
+	gui.ResetOnSpawn = false
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	GuiRef = gui
+
+	local panel = Instance.new("Frame")
+	panel.Size = UDim2.fromOffset(380, 260)
+	panel.Position = UDim2.fromOffset(20, 80)
+	panel.BackgroundColor3 = Color3.fromRGB(22,22,22)
+	panel.BorderSizePixel = 0
+	panel.Parent = gui
+
+	Instance.new("UICorner", panel).CornerRadius = UDim.new(0,14)
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, -20, 0, 24)
+	title.Position = UDim2.fromOffset(10, 8)
+	title.BackgroundTransparency = 1
+	title.Text = "sleepyy's hitbox extender"
+	title.TextColor3 = Color3.new(1,1,1)
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 18
+	title.TextXAlignment = Left
+	title.Parent = panel
+
+	-- HITBOX TOGGLE BUTTON
+	local hbBtn = Instance.new("TextButton")
+	hbBtn.Size = UDim2.fromOffset(160, 36)
+	hbBtn.Position = UDim2.fromOffset(10, 48)
+	hbBtn.BackgroundColor3 = Color3.fromRGB(80,180,90)
+	hbBtn.Text = "Hitbox: ON"
+	hbBtn.Font = Enum.Font.GothamBold
+	hbBtn.TextSize = 16
+	hbBtn.TextColor3 = Color3.new(1,1,1)
+	hbBtn.Parent = panel
+	Instance.new("UICorner", hbBtn).CornerRadius = UDim.new(0,10)
+
+	hbBtn.MouseButton1Click:Connect(function()
+		HitboxEnabled = not HitboxEnabled
+		hbBtn.Text = HitboxEnabled and "Hitbox: ON" or "Hitbox: OFF"
+		hbBtn.BackgroundColor3 = HitboxEnabled
+			and Color3.fromRGB(80,180,90)
+			or Color3.fromRGB(150,70,70)
+	end)
+
+	-- KEY INFO
+	local keyLabel = Instance.new("TextLabel")
+	keyLabel.Size = UDim2.fromOffset(180, 36)
+	keyLabel.Position = UDim2.fromOffset(190, 48)
+	keyLabel.BackgroundTransparency = 1
+	keyLabel.Text = "Toggle key: ;"
+	keyLabel.TextColor3 = Color3.fromRGB(200,200,200)
+	keyLabel.Font = Enum.Font.Gotham
+	keyLabel.TextSize = 16
+	keyLabel.TextXAlignment = Left
+	keyLabel.Parent = panel
+end
+
+createUI()
+
+--// KEYBIND ;
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == HitboxToggleKey then
+		HitboxEnabled = not HitboxEnabled
+	end
+end)
+
+--// HITBOX SETUP
+local function SetupHitbox(player, character)
+	if ActiveConnections[player.UserId] then
+		ActiveConnections[player.UserId]:Disconnect()
+	end
+
+	local root = character:WaitForChild("HumanoidRootPart", 5)
+	if not root then return end
+
+	local hitbox = character:FindFirstChild("EnlargedHitboxVisual")
+	if not hitbox then
+		hitbox = Instance.new("Part")
+		hitbox.Name = "EnlargedHitboxVisual"
+		hitbox.Shape = CONFIG.PartShape
+		hitbox.Material = CONFIG.Material
+		hitbox.Color = CONFIG.Color
+		hitbox.Anchored = true
+		hitbox.Massless = true
+
+		-- 🔑 DOES NOT BLOCK ATTACKS
+		hitbox.CanCollide = false
+		hitbox.CanTouch = false
+		hitbox.CanQuery = false
+		hitbox.CastShadow = false
+
+		hitbox.Size = Vector3.new(4,4,4)
+		hitbox.Parent = character
+	end
+
+	local smoothCF = hitbox.CFrame
+	local smoothSize = hitbox.Size
+
+	local conn
+	conn = RunService.RenderStepped:Connect(function(dt)
+		if not HitboxEnabled then
+			hitbox.Transparency = 1
+			return
+		end
+
+		if not root.Parent then
+			conn:Disconnect()
+			hitbox:Destroy()
+			return
+		end
+
+		local base = math.max(root.Size.X, root.Size.Y, root.Size.Z)
+		local diameter = math.clamp(base * CurrentScale, 1, 120)
+
+		local posT = math.clamp(dt * CONFIG.PositionLerpSpeed, 0, 1)
+		local sizeT = math.clamp(dt * CONFIG.SizeLerpSpeed, 0, 1)
+
+		smoothCF = smoothCF:Lerp(root.CFrame, posT)
+		smoothSize = V3Lerp(smoothSize, Vector3.new(diameter,diameter,diameter), sizeT)
+
+		hitbox.CFrame = smoothCF
+		hitbox.Size = smoothSize
+		hitbox.Transparency = CurrentTransparency
+	end)
+
+	ActiveConnections[player.UserId] = conn
+	Initialized[player.UserId] = true
+end
+
+--// PLAYER HANDLING
+local function HandlePlayer(player)
+	if player == LocalPlayer then return end
+
+	player.CharacterAdded:Connect(function(char)
+		Initialized[player.UserId] = false
+		SetupHitbox(player, char)
+	end)
+
+	if player.Character then
+		SetupHitbox(player, player.Character)
+	end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+	HandlePlayer(p)
+end
+
+Players.PlayerAdded:Connect(HandlePlayer)
+
+--// WATCHDOG
+task.spawn(function()
+	while true do
+		task.wait(CONFIG.WatchdogInterval)
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LocalPlayer and p.Character and not Initialized[p.UserId] then
+				SetupHitbox(p, p.Character)
+			end
+		end
+	end
+end)
