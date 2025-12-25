@@ -2,212 +2,180 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-
 local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
 
---// CONFIG
+--// CONFIG (YOU CAN CHANGE THESE)
 local CONFIG = {
-	ScaleMin = 1,
-	ScaleMax = 40,
-	ScaleDefault = 6,
+	HitboxEnabled = true,
+	ESPEnabled = true,
 
-	TransMin = 0,
-	TransMax = 1,
-	TransDefault = 0.75,
+	Range = 6000,           -- 🔥 MAIN RANGE CONTROL
+	HitboxScale = 10,       -- base size
+	MaxHitboxSize = 160,    -- hard clamp (safety)
 
-	Color = Color3.fromRGB(0, 0, 0),
-	PartShape = Enum.PartType.Ball,
-	Material = Enum.Material.Neon,
-
-	PositionLerpSpeed = 25,
-	SizeLerpSpeed = 25,
-	WatchdogInterval = 2,
+	ToggleKey = Enum.KeyCode.Semicolon, -- ;
 }
 
---// STATE
-local CurrentScale = CONFIG.ScaleDefault
-local CurrentTransparency = CONFIG.TransDefault
+--// UI
+local gui = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+gui.Name = "DevHitboxESP"
 
-local HitboxEnabled = true
-local HitboxToggleKey = Enum.KeyCode.Semicolon
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.fromOffset(220, 170)
+frame.Position = UDim2.fromOffset(20, 200)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
 
-local ActiveConnections = {}
-local Initialized = {}
+local corner = Instance.new("UICorner", frame)
 
-local GuiRef
-
---// LERP UTILS
-local function Lerp(a,b,t) return a + (b-a)*t end
-local function V3Lerp(a,b,t)
-	return Vector3.new(
-		Lerp(a.X,b.X,t),
-		Lerp(a.Y,b.Y,t),
-		Lerp(a.Z,b.Z,t)
-	)
+local function makeButton(text, y)
+	local b = Instance.new("TextButton", frame)
+	b.Size = UDim2.fromOffset(200, 30)
+	b.Position = UDim2.fromOffset(10, y)
+	b.Text = text
+	b.BackgroundColor3 = Color3.fromRGB(45,45,45)
+	b.TextColor3 = Color3.new(1,1,1)
+	b.Font = Enum.Font.Gotham
+	b.TextSize = 14
+	Instance.new("UICorner", b)
+	return b
 end
 
---// GUI
-local function createUI()
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "HitboxControls"
-	gui.ResetOnSpawn = false
-	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-	GuiRef = gui
+local hitboxBtn = makeButton("Hitbox: ON", 10)
+local espBtn = makeButton("ESP: ON", 50)
+local rangeLabel = makeButton("Range: "..CONFIG.Range, 90)
 
-	local panel = Instance.new("Frame")
-	panel.Size = UDim2.fromOffset(380, 260)
-	panel.Position = UDim2.fromOffset(20, 80)
-	panel.BackgroundColor3 = Color3.fromRGB(22,22,22)
-	panel.BorderSizePixel = 0
-	panel.Parent = gui
+--// BUTTON LOGIC
+hitboxBtn.MouseButton1Click:Connect(function()
+	CONFIG.HitboxEnabled = not CONFIG.HitboxEnabled
+	hitboxBtn.Text = "Hitbox: "..(CONFIG.HitboxEnabled and "ON" or "OFF")
+end)
 
-	Instance.new("UICorner", panel).CornerRadius = UDim.new(0,14)
+espBtn.MouseButton1Click:Connect(function()
+	CONFIG.ESPEnabled = not CONFIG.ESPEnabled
+	espBtn.Text = "ESP: "..(CONFIG.ESPEnabled and "ON" or "OFF")
+end)
 
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, -20, 0, 24)
-	title.Position = UDim2.fromOffset(10, 8)
-	title.BackgroundTransparency = 1
-	title.Text = "sleepyy's hitbox extender"
-	title.TextColor3 = Color3.new(1,1,1)
-	title.Font = Enum.Font.GothamBold
-	title.TextSize = 18
-	title.TextXAlignment = Left
-	title.Parent = panel
+rangeLabel.MouseButton1Click:Connect(function()
+	CONFIG.Range += 1000
+	if CONFIG.Range > 20000 then
+		CONFIG.Range = 2000
+	end
+	rangeLabel.Text = "Range: "..CONFIG.Range
+end)
 
-	-- HITBOX TOGGLE BUTTON
-	local hbBtn = Instance.new("TextButton")
-	hbBtn.Size = UDim2.fromOffset(160, 36)
-	hbBtn.Position = UDim2.fromOffset(10, 48)
-	hbBtn.BackgroundColor3 = Color3.fromRGB(80,180,90)
-	hbBtn.Text = "Hitbox: ON"
-	hbBtn.Font = Enum.Font.GothamBold
-	hbBtn.TextSize = 16
-	hbBtn.TextColor3 = Color3.new(1,1,1)
-	hbBtn.Parent = panel
-	Instance.new("UICorner", hbBtn).CornerRadius = UDim.new(0,10)
-
-	hbBtn.MouseButton1Click:Connect(function()
-		HitboxEnabled = not HitboxEnabled
-		hbBtn.Text = HitboxEnabled and "Hitbox: ON" or "Hitbox: OFF"
-		hbBtn.BackgroundColor3 = HitboxEnabled
-			and Color3.fromRGB(80,180,90)
-			or Color3.fromRGB(150,70,70)
-	end)
-
-	-- KEY INFO
-	local keyLabel = Instance.new("TextLabel")
-	keyLabel.Size = UDim2.fromOffset(180, 36)
-	keyLabel.Position = UDim2.fromOffset(190, 48)
-	keyLabel.BackgroundTransparency = 1
-	keyLabel.Text = "Toggle key: ;"
-	keyLabel.TextColor3 = Color3.fromRGB(200,200,200)
-	keyLabel.Font = Enum.Font.Gotham
-	keyLabel.TextSize = 16
-	keyLabel.TextXAlignment = Left
-	keyLabel.Parent = panel
-end
-
-createUI()
-
---// KEYBIND ;
+--// KEYBINDS
 UserInputService.InputBegan:Connect(function(input, gp)
 	if gp then return end
-	if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == HitboxToggleKey then
-		HitboxEnabled = not HitboxEnabled
+
+	if input.KeyCode == CONFIG.ToggleKey then
+		CONFIG.HitboxEnabled = not CONFIG.HitboxEnabled
+		hitboxBtn.Text = "Hitbox: "..(CONFIG.HitboxEnabled and "ON" or "OFF")
 	end
 end)
 
 --// HITBOX SETUP
-local function SetupHitbox(player, character)
-	if ActiveConnections[player.UserId] then
-		ActiveConnections[player.UserId]:Disconnect()
-	end
-
+local function setupHitbox(character)
 	local root = character:WaitForChild("HumanoidRootPart", 5)
 	if not root then return end
 
-	local hitbox = character:FindFirstChild("EnlargedHitboxVisual")
-	if not hitbox then
-		hitbox = Instance.new("Part")
-		hitbox.Name = "EnlargedHitboxVisual"
-		hitbox.Shape = CONFIG.PartShape
-		hitbox.Material = CONFIG.Material
-		hitbox.Color = CONFIG.Color
-		hitbox.Anchored = true
-		hitbox.Massless = true
+	local box = Instance.new("Part")
+	box.Name = "DevHitbox"
+	box.Shape = Enum.PartType.Ball
+	box.Anchored = true
+	box.CanCollide = false
+	box.CanTouch = false
+	box.CanQuery = false -- IMPORTANT (no ray blocking)
+	box.Material = Enum.Material.ForceField
+	box.Color = Color3.fromRGB(255, 0, 0)
+	box.Transparency = 0.6
+	box.Parent = character
 
-		-- 🔑 DOES NOT BLOCK ATTACKS
-		hitbox.CanCollide = false
-		hitbox.CanTouch = false
-		hitbox.CanQuery = false
-		hitbox.CastShadow = false
+	RunService.RenderStepped:Connect(function()
+		if not box.Parent or not root.Parent then return end
 
-		hitbox.Size = Vector3.new(4,4,4)
-		hitbox.Parent = character
-	end
-
-	local smoothCF = hitbox.CFrame
-	local smoothSize = hitbox.Size
-
-	local conn
-	conn = RunService.RenderStepped:Connect(function(dt)
-		if not HitboxEnabled then
-			hitbox.Transparency = 1
+		if not CONFIG.HitboxEnabled then
+			box.Transparency = 1
 			return
 		end
 
-		if not root.Parent then
-			conn:Disconnect()
-			hitbox:Destroy()
+		local dist = (Camera.CFrame.Position - root.Position).Magnitude
+		if dist > CONFIG.Range then
+			box.Transparency = 1
 			return
 		end
+
+		box.Transparency = 0.6
+		box.CFrame = root.CFrame
 
 		local base = math.max(root.Size.X, root.Size.Y, root.Size.Z)
-		local diameter = math.clamp(base * CurrentScale, 1, 120)
+		local distBoost = math.clamp(dist / 400, 1, 2.5)
 
-		local posT = math.clamp(dt * CONFIG.PositionLerpSpeed, 0, 1)
-		local sizeT = math.clamp(dt * CONFIG.SizeLerpSpeed, 0, 1)
+		local size = base * CONFIG.HitboxScale * distBoost
+		size = math.clamp(size, 4, CONFIG.MaxHitboxSize)
 
-		smoothCF = smoothCF:Lerp(root.CFrame, posT)
-		smoothSize = V3Lerp(smoothSize, Vector3.new(diameter,diameter,diameter), sizeT)
-
-		hitbox.CFrame = smoothCF
-		hitbox.Size = smoothSize
-		hitbox.Transparency = CurrentTransparency
+		box.Size = Vector3.new(size, size, size)
 	end)
+end
 
-	ActiveConnections[player.UserId] = conn
-	Initialized[player.UserId] = true
+--// ESP SETUP
+local function setupESP(player)
+	if player == LocalPlayer then return end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromOffset(100, 40)
+	billboard.AlwaysOnTop = true
+	billboard.Name = "DevESP"
+
+	local label = Instance.new("TextLabel", billboard)
+	label.Size = UDim2.fromScale(1,1)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.new(1,1,1)
+	label.TextStrokeTransparency = 0
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.Text = player.Name
+
+	local function attach(char)
+		local head = char:WaitForChild("Head", 5)
+		if not head then return end
+		billboard.Parent = head
+	end
+
+	if player.Character then attach(player.Character) end
+	player.CharacterAdded:Connect(attach)
+
+	RunService.RenderStepped:Connect(function()
+		if not billboard.Parent then return end
+		if not CONFIG.ESPEnabled then
+			billboard.Enabled = false
+			return
+		end
+
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not root then return end
+
+		local dist = (Camera.CFrame.Position - root.Position).Magnitude
+		billboard.Enabled = dist <= CONFIG.Range
+	end)
 end
 
 --// PLAYER HANDLING
-local function HandlePlayer(player)
-	if player == LocalPlayer then return end
-
-	player.CharacterAdded:Connect(function(char)
-		Initialized[player.UserId] = false
-		SetupHitbox(player, char)
-	end)
-
-	if player.Character then
-		SetupHitbox(player, player.Character)
-	end
-end
-
-for _, p in ipairs(Players:GetPlayers()) do
-	HandlePlayer(p)
-end
-
-Players.PlayerAdded:Connect(HandlePlayer)
-
---// WATCHDOG
-task.spawn(function()
-	while true do
-		task.wait(CONFIG.WatchdogInterval)
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= LocalPlayer and p.Character and not Initialized[p.UserId] then
-				SetupHitbox(p, p.Character)
-			end
+for _, plr in ipairs(Players:GetPlayers()) do
+	if plr ~= LocalPlayer then
+		setupESP(plr)
+		if plr.Character then
+			setupHitbox(plr.Character)
 		end
+		plr.CharacterAdded:Connect(setupHitbox)
 	end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+	setupESP(plr)
+	plr.CharacterAdded:Connect(setupHitbox)
 end)
